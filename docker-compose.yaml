@@ -1,7 +1,7 @@
 version: "3.6"
 services:
   zentadata-dev:
-    image: zentadata/zentadata-dev:latest
+    image: zentadata/zentadata-dev:0.6
     container_name: zentadata-dev
     environment:
       ZENTADATA_LICENSE_KEY: "your-license-key-here"
