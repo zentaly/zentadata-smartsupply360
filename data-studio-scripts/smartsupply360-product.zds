@@ -1,0 +1,86 @@
+String MODEL   = "Data";
+String PRODUCT = "Product";
+
+String SPOT_DEMAND      = "Spot_Demand";
+String RECOMMEND_SUPPLY = "Recommendation";
+String FULFILLMENT      = "Fulfillment";
+
+DataFrame orders   = zen.read(MODEL).from("Orders");
+DataFrame products = zen.read(MODEL).from("Products");
+DataFrame stores   = zen.read(MODEL).from("Stores");
+DataFrame stocks   = zen.read(MODEL).from("Stocks");
+
+
+// SPOT DEMAND
+DataFrame avgCategoryDemand = orders
+        .join(products, orders.col("productId").equalTo(products.col("uid")))
+        .groupBy(list(products.col("category")),
+                avg(col("quantity")).toDecimal(10, 2).as("avg_category_qty"));
+
+DataFrame areaStats = orders
+        .join(products, orders.col("productId").equalTo(products.col("uid")))
+        .join(stores, orders.col("storeId").equalTo(stores.col("uid")))
+        .groupBy(list(stores.col("city"), stores.col("area"), products.col("category")),
+                avg(col("quantity")).toDecimal(10, 2).as("avg_area_qty"));
+
+DataFrame spotDemand = areaStats
+        .join(avgCategoryDemand, areaStats.col("category").equalTo(avgCategoryDemand.col("category")))
+        .select(areaStats.col("city"),
+                areaStats.col("area"),
+                areaStats.col("category"),
+                col("avg_area_qty").divide(col("avg_category_qty"))
+                        .multiply(100).toDecimal(10, 2).as("saturation_level_%"))
+        .sort(asc("saturation_level_%"));
+
+zen.catalog().add(PRODUCT, SPOT_DEMAND, spotDemand);
+
+
+// RECOMMEND SUPPLY
+DataFrame demand = zen.read(PRODUCT).from(SPOT_DEMAND).limit(5);
+
+DataFrame avgDemand = orders
+        .groupBy(list(col("productId")), avg(col("quantity")).toDecimal(10, 2).as("avg_product_qty"));
+
+DataFrame spotStoreCategory = demand
+        .join(stores, demand.col("city").equalTo(stores.col("city"))
+                .and(demand.col("area").equalTo(stores.col("area"))))
+        .groupBy(list(stores.col("name").as("store"), demand.col("category")), lit(1));
+
+DataFrame recSupply = spotStoreCategory
+        .join(products, spotStoreCategory.col("category").equalTo(products.col("category")))
+        .join(avgDemand, products.col("uid").equalTo(avgDemand.col("productId")))
+        .select(spotStoreCategory.col("store"),
+                products.col("name").as("product"),
+                avgDemand.col("avg_product_qty").as("recommended_qty"))
+        .sort(asc("store"));
+
+zen.catalog().add(PRODUCT, RECOMMEND_SUPPLY, recSupply);
+
+
+// FULFILLMENT
+DataFrame demandCategories = zen.read(PRODUCT).from(SPOT_DEMAND)
+        .limit(5)
+        .select(col("category"))
+        .distinct();
+
+DataFrame stocksAgg = stocks
+        .select(col("uid").as("uid_stock"),
+                col("quantity"))
+        .groupBy(list(col("uid_stock")), sum(col("quantity")).as("quantity_stock"));
+
+DataFrame pendingOrderItems = orders
+        .where(not(col("isCompleted")))
+        .select(col("productId").as("uid_ordered"),
+                col("quantity").as("quantity"))
+        .groupBy(list(col("uid_ordered")), sum(col("quantity")).as("quantity_ordered"));
+
+DataFrame requiredProducts = pendingOrderItems
+        .leftJoin(stocksAgg, col("uid_stock").equalTo(col("uid_ordered")))
+        .join(products, col("uid_ordered").equalTo(products.col("uid")))
+        .join(demandCategories, demandCategories.col("category").equalTo(products.col("category")))
+        .where(col("quantity_ordered").gt(col("quantity_stock")).or(col("quantity_stock").isNull()))
+        .select(products.col("name"),
+                products.col("category"),
+                col("quantity_ordered").minus(coalesce(col("quantity_stock"), lit(0))).as("required_quantity"));
+
+zen.catalog().add(PRODUCT, FULFILLMENT, requiredProducts);

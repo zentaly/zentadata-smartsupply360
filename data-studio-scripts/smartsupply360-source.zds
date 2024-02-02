@@ -1,0 +1,36 @@
+String PATH = "/dataset/smartsupply360/";
+String MODEL = "Data";
+
+DataFrame products = zen.read("file")
+        .format(DataFormat.JSON)
+        .option(JsonOpts.IS_MULTILINE, "false")
+        .from(PATH + "products.json");
+
+DataFrame stores = zen.read("file")
+        .format(DataFormat.JSON)
+        .option(JsonOpts.IS_MULTILINE, "false")
+        .from(PATH + "stores.json");
+
+DataFrame orders = zen.read("file")
+        .format(DataFormat.JSON)
+        .option(JsonOpts.IS_MULTILINE, "false")
+        .from(PATH + "orders.json")
+        .withColumn("date_tmp", to_timestamp(col("date").divide(1000)))
+        .drop("date")
+        .drop("uid")
+        .withColumnRenamed("date_tmp", "date")
+        .withColumn("item", explode(col("items")))
+        .select(col("*"), col("item.*"))
+        .drop("items")
+        .drop("item");
+
+DataFrame stocks = zen.read("file")
+        .format(DataFormat.JSON)
+        .option(JsonOpts.IS_MULTILINE, "false")
+        .from(PATH + "stocks.json")
+        .select(col("warehouse"), col("quantity"), col("product.*"));
+
+zen.catalog().add(MODEL, "Orders", orders);
+zen.catalog().add(MODEL, "Stocks", stocks);
+zen.catalog().add(MODEL, "Stores", stores);
+zen.catalog().add(MODEL, "Products", products);

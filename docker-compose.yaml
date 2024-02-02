@@ -1,0 +1,15 @@
+version: "3.6"
+services:
+  zentadata-dev:
+    image: zentadata/zentadata-dev:latest
+    container_name: zentadata-dev
+    environment:
+      ZENTADATA_LICENSE_KEY: "your-license-key-here"
+      MAX_HEAP_SIZE: 2g
+    ports:
+      - 8090:8090
+      - 4040:4040
+    volumes:
+      - type: bind
+        source: dataset
+        target: /dataset
